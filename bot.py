@@ -207,7 +207,7 @@ def listen_to_events():
                 if not line:
                     continue
                     
-                try:
+try:
                     event = json.loads(line.decode('utf-8'))
                 except Exception as parse_err:
                     print(f"[STREAM ERROR] Failed to parse stream line data: {parse_err}")
@@ -225,11 +225,14 @@ def listen_to_events():
                     
                     print(f"[CHALLENGE RECEIVED] ID: {challenge_id} from user: @{challenger_name} | Variant: {variant} | Rated: {is_rated}")
                     
+                    # 1. Variant filtering (Engines must only accept variants they know how to calculate)
                     if variant != 'standard':
                         print(f"[CHALLENGE DECLINED] Reason: Variant '{variant}' is not supported. Sending rejection request...")
                         requests.post(f"https://lichess.org/api/challenge/{challenge_id}/decline", headers=HEADERS, json={"reason": "variant"}, timeout=5)
                         continue
 
+                    # 2. Public Rated & Casual Acceptance Logic
+                    # 🚀 OPEN ACCESS: This accepts ALL standard challenges, whether rated or casual!
                     print(f"[CHALLENGE ACCEPTED] Standard conditions valid. Processing accept call to ID: {challenge_id}...")
                     accept_url = f"https://lichess.org/api/challenge/{challenge_id}/accept"
                     accept_res = requests.post(accept_url, headers=HEADERS, timeout=5)
@@ -256,11 +259,11 @@ if __name__ == "__main__":
     print(f"[SYSTEM] Validating environment credentials for account: {BOT_USERNAME}")
     
     try:
-        # FIXED: Points directly to the official Lichess Account Profile API endpoint
+        # Points directly to the official Lichess Account Profile API endpoint
         test_res = requests.get("https://lichess.org/api/account", headers=HEADERS, timeout=5)
         
         if test_res.status_code == 401:
-            print("[CRITICAL] Lichess rejected token! Error 401: Unauthorized. Check your LICHESS_TOKEN in Railway variables.")
+            print("[CRITICAL] Lichess rejected token! Error 401: Unauthorized. Check your LICHESS_TOKEN variable.")
             exit(1)
         elif test_res.status_code != 200:
             print(f"[CRITICAL] Lichess API error! Server response ({test_res.status_code}): {test_res.text}")
