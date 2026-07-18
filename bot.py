@@ -210,7 +210,7 @@ def play_game(game_id):
 def listen_to_events():
     """Listens to global challenges and game starts with heavy diagnostic tracking."""
     print(f"Starting global event listener for user: {BOT_USERNAME}")
-    url = "https://lichess.org"
+    url = "https://lichess.org/api/stream/event"
     
     while True:
         try:
@@ -241,28 +241,24 @@ def listen_to_events():
                     if variant != 'standard':
                         print(f"[CHALLENGE DECLINED] Reason: Variant '{variant}' is not supported. Sending rejection request...")
                         requests.post(f"https://lichess.org/api/challenge/{challenge_id}/decline", headers=HEADERS, json={"reason": "variant"}, timeout=5)
-continue
-print(f"[CHALLENGE ACCEPTED] Standard conditions valid. Processing accept call to ID: {challenge_id}...")
-accept_url = 
-f"https://lichess.org/api/challenge/{challenge_id}/accept"
-accept_res = requests.post(accept_url, headers=HEADERS, 
-timeout=5)
-print(f"[CHALLENGE RESPONSE] Lichess server accept action 
-status code: {accept_res.status_code}")
+                        continue
 
-elif event_type == 'gameStart':
-game_id = event['game']['id']
-print(f"[MATCH INITIALIZED] Spawning independent execution 
-thread for game ID: {game_id}")
-game_thread = threading.Thread(target=play_game, args=(game_id,), daemon=True)
-game_thread.start()
+                    print(f"[CHALLENGE ACCEPTED] Standard conditions valid. Processing accept call to ID: {challenge_id}...")
+                    accept_url = f"https://lichess.org/api/challenge/{challenge_id}/accept
+                    accept_res = requests.post(accept_url, headers=HEADERS, timeout=5)
+                    print(f"[CHALLENGE RESPONSE] Lichess server accept action status code: {accept_res.status_code}")
 
-except Exception as global_err:
-print(f"[SYSTEM CRITICAL] Network or stream infrastructure 
-drop: {global_err}")
-print("[SYSTEM] Attempting automatic connection 
-reconstruction in 5 seconds...")
-time.sleep(5)
+                elif event_type == 'gameStart':
+                    game_id = event['game']['id']  
+                    print(f"[MATCH INITIALIZED] Spawning independent execution thread for game ID: {game_id}")
+                    game_thread = threading.Thread(target=play_game, args=(game_id,), daemon=True)
+                    game_thread.start()
+                    
+        except Exception as global_err:
+            print(f"[SYSTEM CRITICAL] Network or stream infrastructure drop: {global_err}")
+            print("[SYSTEM] Attempting automatic connection reconstruction in 5 seconds...")
+            time.sleep(5)
+
 
 --- EXECUTION ---
 if name == "main":
