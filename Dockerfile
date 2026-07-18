@@ -1,21 +1,24 @@
-# Step 1: Base footprint (Never changes - Cached)
-FROM python:3.10-slim
+# Use an official Python runtime environment
+FROM python:3.11-slim
 
-# FIX: Force Python to unbuffer stdout/stderr and flush logs instantly
-ENV PYTHONUNBUFFERED=1
-
-# Step 2: System dependencies (Rarely changes - Heavily Cached)
+# Install Stockfish directly via the system package manager
 RUN apt-get update && apt-get install -y \
     stockfish \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
+# Set up the working directory inside the container
 WORKDIR /app
 
-# Step 3: Python library cache layer (Only runs if requirements.txt changes)
+# Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Step 4: App code (Changes often - Only builds the diff, instantly)
-COPY bot.py .
+# Copy the rest of the application code
+COPY . .
 
-CMD ["python", "bot.py"]
+# Expose the internal port Render needs for the fake health check server
+EXPOSE 8080
+
+# Start the application
+CMD ["python", "main.py"]
