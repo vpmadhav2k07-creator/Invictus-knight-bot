@@ -164,7 +164,7 @@ def play_game(game_id):
             if bot_color is None:
                 print(f"[{game_id}] Stream reconnected mid-game. Fetching true match details...")
                 try:
-                    export_url = f"https://lichess.orgstream/{game_id}"
+                    export_url = f"https://lichess.org/api/game/stream/{game_id}"
                     meta_resp = requests.get(export_url, headers=HEADERS, stream=True, timeout=5)
                     for meta_line in meta_resp.iter_lines():
                         if meta_line:
