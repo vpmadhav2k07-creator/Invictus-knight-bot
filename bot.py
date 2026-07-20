@@ -244,7 +244,7 @@ def listen_to_events():
                         continue
 
                     print(f"[CHALLENGE ACCEPTED] Standard conditions valid. Processing accept call to ID: {challenge_id}...")
-                    accept_url = f"https://lichess.org/api/challenge/{challenge_id}/accept
+                    accept_url = f"https://lichess.org/api/challenge/{challenge_id}/accept"
                     accept_res = requests.post(accept_url, headers=HEADERS, timeout=5)
                     print(f"[CHALLENGE RESPONSE] Lichess server accept action status code: {accept_res.status_code}")
 
@@ -260,53 +260,47 @@ def listen_to_events():
             time.sleep(5)
 
 
---- EXECUTION ---
-if name == "main":
+# --- EXECUTION ---
+if __name__ == "__main__":
     if not TOKEN or TOKEN == "YOUR_SECRET_TOKEN_HERE":
-        print("[CRITICAL] Authentication Failed: LICHESS_TOKEN 
-        variable is completely missing or empty!")
+        print("[CRITICAL] Authentication Failed: LICHESS_TOKEN variable is completely missing or empty!")
         exit(1)
-       
-        print(f"[SYSTEM] Validating environment credentials for account: 
-        {BOT_USERNAME}")
+    
+    print(f"[SYSTEM] Validating environment credentials for account: {BOT_USERNAME}")
+    
+    try:
+        test_res = requests.get("https://lichess.org/api/account", headers=HEADERS, timeout=5)
         
-        try:test_res = requests.get("https://lichess.org/api/account", 
-                                    headers=HEADERS, timeout=5)
-         
         if test_res.status_code == 401:
-            print("[CRITICAL] Lichess rejected token! Error 401: 
-            Unauthorized. Check your LICHESS_TOKEN variable.")
+            print("[CRITICAL] Lichess rejected token! Error 401: Unauthorized. Check your LICHESS_TOKEN variable.")
             exit(1)
-            elif test_res.status_code != 200:
-                print(f"[CRITICAL] Lichess API error! Server response 
-                ({test_res.status_code}): {test_res.text}")
-                exit(1)
-                account_data = test_res.json()
-                print(f"[SUCCESS] Successfully authenticated account on 
-                Lichess! Connected to: {account_data.get('id')}")
-                if account_data.get('title') != 'BOT':
-                    print("[WARNING] Your account does NOT have the purple BOT 
-                    badge on Lichess yet.")
-                    print("[WARNING] Run this command in your computer terminal to upgrade it permanently:")
-                    print(f"curl -d '' https://lichess.org -H "Authorization: Bearer 
-                    {TOKEN}"")
-                    
-                    except Exception as api_err:print(f"[CRITICAL] Failed to communicate with Lichess verification servers: {api_err}")
-                    exit(1)
-                    
-                    # 1. Start the fake health check server thread for Render 
-                    compatibility
-                    render_server = threading.Thread(target=run_fake_server, 
-                    daemon=True)
-                    render_server.start()
-                    # 2. Start the local engine processing pipeline thread
-                    worker_thread = threading.Thread(target=stockfish_worker, 
-                    daemon=True)
-                    worker_thread.start()
-                    
-                    try:
-                    listen_to_events()
-                    except KeyboardInterrupt:
-                    print("\n[SHUTDOWN] Bot execution halted manually.")
-                    finally:
-                    print("[SHUTDOWN] Clean exit completed.")
+        elif test_res.status_code != 200:
+            print(f"[CRITICAL] Lichess API error! Server response ({test_res.status_code}): {test_res.text}")
+            exit(1)
+        
+        account_data = test_res.json()
+        print(f"[SUCCESS] Successfully authenticated account on Lichess! Connected to: {account_data.get('id')}")
+        
+        if account_data.get('title') != 'BOT':
+            print("[WARNING] Your account does NOT have the purple BOT badge on Lichess yet.")
+            print("[WARNING] Run this command in your computer terminal to upgrade it permanently:")
+            print(f'curl -d "" https://lichess.org/api/bot/account/upgrade -H "Authorization: Bearer {TOKEN}"')
+        
+    except Exception as api_err:
+        print(f"[CRITICAL] Failed to communicate with Lichess verification servers: {api_err}")
+        exit(1)
+    
+    # 1. Start the fake health check server thread for Render compatibility
+    render_server = threading.Thread(target=run_fake_server, daemon=True)
+    render_server.start()
+    
+    # 2. Start the local engine processing pipeline thread
+    worker_thread = threading.Thread(target=stockfish_worker, daemon=True)
+    worker_thread.start()
+    
+    try:
+        listen_to_events()
+    except KeyboardInterrupt:
+        print("\n[SHUTDOWN] Bot execution halted manually.")
+    finally:
+        print("[SHUTDOWN] Clean exit completed.")
