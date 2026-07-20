@@ -8,6 +8,7 @@ import queue
 import shutil
 import chess
 import chess.engine
+import chess.variant
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # --- CONFIGURATION ---
@@ -17,6 +18,18 @@ BOT_USERNAME = "Invictus-Knight-Bot"
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
     "Content-Type": "application/json"
+}
+
+# Supported variants mapping
+SUPPORTED_VARIANTS = {
+    'standard': chess.Board,
+    'antichess': chess.variant.AntichessBoard,
+    'atomic': chess.variant.AtomicBoard,
+    'crazyhouse': chess.variant.CrazyhouseBoard,
+    'horde': chess.variant.HordeBoard,
+    'kingofthehill': chess.variant.KingOfTheHillBoard,
+    'racingkings': chess.variant.RacingKingsBoard,
+    'threecheck': chess.variant.ThreeCheckBoard,
 }
 
 # Thread-safe job queue for engine calculations
@@ -61,39 +74,83 @@ def make_lichess_move(game_id, move_str):
     except Exception as e:
         print(f"[{game_id}] Error posting move: {e}")
 
+# --- ENGINE DETECTION ---
+def find_engine_binary(engine_name):
+    """Finds the engine binary in system paths."""
+    resolved_path = shutil.which(engine_name)
+    
+    if resolved_path:
+        print(f"[ENGINE] Successfully located {engine_name} binary at: {resolved_path}")
+        return resolved_path
+    
+    # Fallback paths for different engines
+    fallback_paths = {
+        'stockfish': ["./stockfish", "/usr/games/stockfish", "/usr/bin/stockfish", "/usr/local/bin/stockfish"],
+        'fairy-stockfish': ["./fairy-stockfish", "/usr/games/fairy-stockfish", "/usr/bin/fairy-stockfish", "/usr/local/bin/fairy-stockfish"],
+        'fairyfish': ["./fairyfish", "/usr/games/fairyfish", "/usr/bin/fairyfish", "/usr/local/bin/fairyfish"]
+    }
+    
+    for path in fallback_paths.get(engine_name, []):
+        if os.path.exists(path):
+            print(f"[ENGINE] Fallback found {engine_name} binary at: {path}")
+            return path
+    
+    return None
+
 # --- BACKGROUND ENGINE WORKER ---
 def stockfish_worker():
     """Dedicated background thread handling all Stockfish calculations sequentially."""
-    print("[ENGINE] Initializing local Stockfish engine instance...")
+    print("[ENGINE] Initializing engine instances...")
     
-    resolved_path = shutil.which("stockfish")
-    
-    if resolved_path:
-        print(f"[ENGINE] Successfully located Stockfish binary at: {resolved_path}")
-    else:
-        possible_paths = ["./stockfish", "/usr/games/stockfish", "/usr/bin/stockfish", "/usr/local/bin/stockfish"]
-        for path in possible_paths:
-            if os.path.exists(path):
-                resolved_path = path
-                print(f"[ENGINE] Fallback found Stockfish binary at: {resolved_path}")
-                break
-                
-    if not resolved_path:
-        print("[CRITICAL] Could not locate Stockfish binary anywhere in the system path!")
+    # Initialize Normal Stockfish (for standard chess)
+    stockfish_path = find_engine_binary("stockfish")
+    if not stockfish_path:
+        print("[CRITICAL] Could not locate Stockfish binary!")
         return
+    
+    # Initialize Fairy Stockfish (for variants)
+    fairy_stockfish_path = find_engine_binary("fairy-stockfish")
+    if not fairy_stockfish_path:
+        fairy_stockfish_path = find_engine_binary("fairyfish")
+    
+    if fairy_stockfish_path:
+        print("[ENGINE] Fairy Stockfish found - variant support enabled")
+    else:
+        print("[WARNING] Fairy Stockfish not found - only standard chess will be optimal")
 
     try:
-        engine = chess.engine.SimpleEngine.popen_uci(resolved_path)
-        engine.configure({"Skill Level": 20, "Hash": 64, "Threads": 1})
-        print("[ENGINE] Stockfish is fully loaded and ready to accept match jobs.")
+        normal_engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+        normal_engine.configure({"Skill Level": 20, "Hash": 64, "Threads": 1})
+        print("[ENGINE] Normal Stockfish is fully loaded and ready.")
     except Exception as e:
-        print(f"[CRITICAL] Failed to start Stockfish engine instance: {e}")
+        print(f"[CRITICAL] Failed to start Normal Stockfish: {e}")
         return
 
-    while True:
-        game_id, moves_list, callback = engine_queue.get()
+    fairy_engine = None
+    if fairy_stockfish_path:
         try:
-            board = chess.Board()
+            fairy_engine = chess.engine.SimpleEngine.popen_uci(fairy_stockfish_path)
+            fairy_engine.configure({"Skill Level": 20, "Hash": 64, "Threads": 1})
+            print("[ENGINE] Fairy Stockfish is fully loaded and ready.")
+        except Exception as e:
+            print(f"[WARNING] Failed to start Fairy Stockfish: {e}")
+            print("[WARNING] Will use Normal Stockfish for all games.")
+
+    while True:
+        game_id, moves_list, callback, variant_key = engine_queue.get()
+        try:
+            # Select appropriate engine
+            if variant_key == 'standard':
+                engine = normal_engine
+            else:
+                engine = fairy_engine if fairy_engine else normal_engine
+                if fairy_engine is None and variant_key != 'standard':
+                    print(f"[{game_id}] WARNING: Using Normal Stockfish for {variant_key} (not optimal)")
+
+            # Create board based on variant
+            board_class = SUPPORTED_VARIANTS.get(variant_key, chess.Board)
+            board = board_class()
+            
             for move in moves_list:
                 try:
                     board.push_uci(move)
@@ -127,9 +184,9 @@ def stockfish_worker():
             engine_queue.task_done()
 
 # --- INDIVIDUAL GAME THREAD ---
-def play_game(game_id):
+def play_game(game_id, variant_key='standard'):
     """Streams individual match events. Breaks loop when game ends."""
-    print(f"\n[GAME START] Thread spawned for game: {game_id}")
+    print(f"\n[GAME START] Thread spawned for game: {game_id} | Variant: {variant_key}")
     url = f"https://lichess.org/api/bot/game/stream/{game_id}"
     
     try:
@@ -227,9 +284,9 @@ def play_game(game_id):
 
         if event_type == 'gameFull' and not sent_welcome:
             if opponent and opponent.get('id'):
-                send_chat_message(game_id, "player", f"Hello @{opponent.get('id')}! Fast Engine Mode active. Good luck!")
+                send_chat_message(game_id, "player", f"Hello @{opponent.get('id')}! Engine Mode active ({variant_key}). Good luck!")
             else:
-                send_chat_message(game_id, "player", "Hello! Fast Engine Mode active. Good luck!")
+                send_chat_message(game_id, "player", f"Hello! Engine Mode active ({variant_key}). Good luck!")
             sent_welcome = True
 
         moves_played = state['moves'].strip().split() if state['moves'].strip() else []
@@ -248,12 +305,13 @@ def play_game(game_id):
                 if move_uci:
                     make_lichess_move(game_id, move_uci)
 
-            engine_queue.put((game_id, moves_played, handle_move_result))
+            engine_queue.put((game_id, moves_played, handle_move_result, variant_key))
 
 # --- GLOBAL EVENT LISTENER ---
 def listen_to_events():
     """Listens to global challenges and game starts with heavy diagnostic tracking."""
     print(f"Starting global event listener for user: {BOT_USERNAME}")
+    print(f"[VARIANTS] Supported: {', '.join(SUPPORTED_VARIANTS.keys())}")
     url = "https://lichess.org/api/stream/event"
     
     while True:
@@ -282,20 +340,21 @@ def listen_to_events():
                     
                     print(f"[CHALLENGE RECEIVED] ID: {challenge_id} from user: @{challenger_name} | Variant: {variant} | Rated: {is_rated}")
                     
-                    if variant != 'standard':
-                        print(f"[CHALLENGE DECLINED] Reason: Variant '{variant}' is not supported. Sending rejection request...")
+                    if variant not in SUPPORTED_VARIANTS:
+                        print(f"[CHALLENGE DECLINED] Reason: Variant '{variant}' is not supported. Supported variants: {', '.join(SUPPORTED_VARIANTS.keys())}")
                         requests.post(f"https://lichess.org/api/challenge/{challenge_id}/decline", headers=HEADERS, json={"reason": "variant"}, timeout=5)
                         continue
 
-                    print(f"[CHALLENGE ACCEPTED] Standard conditions valid. Processing accept call to ID: {challenge_id}...")
+                    print(f"[CHALLENGE ACCEPTED] Variant '{variant}' is supported. Processing accept call to ID: {challenge_id}...")
                     accept_url = f"https://lichess.org/api/challenge/{challenge_id}/accept"
                     accept_res = requests.post(accept_url, headers=HEADERS, timeout=5)
                     print(f"[CHALLENGE RESPONSE] Lichess server accept action status code: {accept_res.status_code}")
 
                 elif event_type == 'gameStart':
-                    game_id = event['game']['id']  
-                    print(f"[MATCH INITIALIZED] Spawning independent execution thread for game ID: {game_id}")
-                    game_thread = threading.Thread(target=play_game, args=(game_id,), daemon=True)
+                    game_id = event['game']['id']
+                    variant_key = event.get('game', {}).get('variant', {}).get('key', 'standard')
+                    print(f"[MATCH INITIALIZED] Spawning independent execution thread for game ID: {game_id} | Variant: {variant_key}")
+                    game_thread = threading.Thread(target=play_game, args=(game_id, variant_key), daemon=True)
                     game_thread.start()
                     
         except Exception as global_err:
