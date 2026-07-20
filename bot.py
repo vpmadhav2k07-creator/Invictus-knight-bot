@@ -133,7 +133,8 @@ def play_game(game_id):
     url = f"https://lichess.org/api/bot/game/stream/{game_id}"
     
     try:
-        response = requests.get(url, headers=HEADERS, stream=True, timeout=None)
+        # Change this inside play_game(game_id):
+response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
     except Exception as e:
         print(f"[{game_id}] Stream connection failed: {e}")
         return
@@ -203,15 +204,16 @@ def play_game(game_id):
 
             engine_queue.put((game_id, moves_played, handle_move_result))
 
-# --- GLOBAL EVENT LISTENER ---
 def listen_to_events():
-    """Listens to global challenges and game starts with heavy diagnostic tracking."""
+    """Listens to global challenges and game starts with robust connection recycling."""
     print(f"Starting global event listener for user: {BOT_USERNAME}")
     url = "https://lichess.org/api/stream/event"
     
     while True:
         try:
-            response = requests.get(url, headers=HEADERS, stream=True, timeout=None)
+            # Crucial Fix: (Connect timeout, Read timeout) 
+            # If Lichess sends no packet or heartbeat for 60 seconds, it triggers an exception to safely reconnect
+            response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
             print("[SERVER] Stream connection successfully established with Lichess pipelines.")
             
             for line in response.iter_lines():
@@ -251,9 +253,9 @@ def listen_to_events():
                     game_thread = threading.Thread(target=play_game, args=(game_id,), daemon=True)
                     game_thread.start()
                     
-        except Exception as global_err:
-            print(f"[SYSTEM CRITICAL] Network or stream infrastructure drop: {global_err}")
-            print("[SYSTEM] Attempting automatic connection reconstruction in 5 seconds...")
+        except (requests.exceptions.RequestException, Exception) as global_err:
+            print(f"[SYSTEM CRITICAL] Connection dropped or timed out: {global_err}")
+            print("[SYSTEM] Re-initializing stream pipeline in 5 seconds...")
             time.sleep(5)
 
 
