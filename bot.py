@@ -42,7 +42,7 @@ def run_fake_server():
 # --- GAME ACTIONS ---
 def send_chat_message(game_id, room, text):
     """Sends a chat message to the opponent or spectator room."""
-    url = f"https://lichess.org{game_id}/chat"
+    url = f"https://lichess.org/api/bot/game/{game_id}/chat"
     data = {"room": room, "text": text}
     try:
         requests.post(url, headers=HEADERS, json=data, timeout=5)
@@ -51,7 +51,7 @@ def send_chat_message(game_id, room, text):
 
 def make_lichess_move(game_id, move_str):
     """Sends the calculated move back to Lichess."""
-    url = f"https://lichess.org{game_id}/move/{move_str}"
+    url = f"https://lichess.org/api/bot/game/{game_id}/move/{move_str}"
     try:
         response = requests.post(url, headers=HEADERS, timeout=5)
         if response.status_code == 200:
