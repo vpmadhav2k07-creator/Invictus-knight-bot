@@ -164,16 +164,13 @@ def play_game(game_id):
             if bot_color is None:
                 print(f"[{game_id}] Stream reconnected mid-game. Fetching true match details...")
                 try:
-                    export_url = f"https://lichess.org/api/bot/game/stream/{game_id}"
-                    meta_resp = requests.get(export_url, headers=HEADERS, stream=True, timeout=5)
-                    for meta_line in meta_resp.iter_lines():
-                        if meta_line:
-                            meta_data = json.loads(meta_line.decode('utf-8'))
-                            if meta_data.get('type') == 'gameFull':
-                                w_id = meta_data.get('white', {}).get('id', '')
-                                bot_color = 'white' if w_id.lower() == BOT_USERNAME.lower() else 'black'
-                                print(f"[{game_id}] Recovered color profile safely: {bot_color.upper()}")
-                                break
+                    export_url = f"https://lichess.org/api/bot/game/{game_id}"
+                    meta_resp = requests.get(export_url, headers=HEADERS, timeout=5)
+                    if meta_resp.status_code == 200:
+                        meta_data = meta_resp.json()
+                        w_id = meta_data.get('white', {}).get('id', '')
+                        bot_color = 'white' if w_id.lower() == BOT_USERNAME.lower() else 'black'
+                        print(f"[{game_id}] Recovered color profile safely: {bot_color.upper()}")
                 except Exception as ex:
                     print(f"[{game_id}] Error recovering color profile: {ex}")
         else:
