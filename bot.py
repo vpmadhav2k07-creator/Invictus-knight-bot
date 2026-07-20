@@ -133,14 +133,27 @@ def play_game(game_id):
     url = f"https://lichess.org/api/bot/game/stream/{game_id}"
     
     try:
-        # Change this inside play_game(game_id):
-response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
+        response = requests.get(url, headers=HEADERS, stream=True, timeout=None)
     except Exception as e:
         print(f"[{game_id}] Stream connection failed: {e}")
         return
         
     bot_color = None
+    opponent = None
     sent_welcome = False
+
+    # helper to normalize player objects
+    def _parse_player_info(player_obj):
+        if not isinstance(player_obj, dict):
+            return {"id": "", "name": "", "rating": None, "title": ""}
+        # common shapes: {'id': 'username', 'name': 'Full Name', 'rating': 1500}
+        player_id = player_obj.get('id') or (player_obj.get('user') or {}).get('id') or ""
+        return {
+            "id": player_id,
+            "name": player_obj.get('name', "") or "",
+            "rating": player_obj.get('rating'),
+            "title": player_obj.get('title', "") or ""
+        }
 
     for line in response.iter_lines():
         if not line:
@@ -152,14 +165,29 @@ response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
             continue
 
         event_type = game_event.get('type')
+        state = None
         
         if event_type == 'gameFull':
-            white_player = game_event.get('white', {})
-            white_id = white_player.get('id', '') if isinstance(white_player, dict) else ''
-            bot_color = 'white' if white_id.lower() == BOT_USERNAME.lower() else 'black'
+            # parse players and determine opponent/bot color
+            white_player = _parse_player_info(game_event.get('white', {}))
+            black_player = _parse_player_info(game_event.get('black', {}))
+
+            if white_player["id"] and white_player["id"].lower() == BOT_USERNAME.lower():
+                bot_color = 'white'
+                opponent = black_player
+            elif black_player["id"] and black_player["id"].lower() == BOT_USERNAME.lower():
+                bot_color = 'black'
+                opponent = white_player
+            else:
+                # fallback: if bot username not present, try to infer from provided IDs
+                bot_color = None
+                opponent = black_player if white_player["id"] else white_player
+
             state = game_event['state']
-            print(f"[{game_id}] Match configuration locked. Bot Color side: {bot_color.upper()}")
-            
+            print(f"[{game_id}] Match configuration locked. Bot Color side: {bot_color.upper() if bot_color else 'UNKNOWN'}")
+            if opponent and opponent.get('id'):
+                print(f"[{game_id}] Opponent found: @{opponent.get('id')} (name={opponent.get('name')}, rating={opponent.get('rating')}, title={opponent.get('title')})")
+
         elif event_type == 'gameState':
             state = game_event
             if bot_color is None:
@@ -169,21 +197,39 @@ response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
                     meta_resp = requests.get(export_url, headers=HEADERS, timeout=5)
                     if meta_resp.status_code == 200:
                         meta_data = meta_resp.json()
-                        w_id = meta_data.get('white', {}).get('id', '')
-                        bot_color = 'white' if w_id.lower() == BOT_USERNAME.lower() else 'black'
-                        print(f"[{game_id}] Recovered color profile safely: {bot_color.upper()}")
+                        white_player = _parse_player_info(meta_data.get('white', {}))
+                        black_player = _parse_player_info(meta_data.get('black', {}))
+
+                        if white_player["id"] and white_player["id"].lower() == BOT_USERNAME.lower():
+                            bot_color = 'white'
+                            opponent = black_player
+                        elif black_player["id"] and black_player["id"].lower() == BOT_USERNAME.lower():
+                            bot_color = 'black'
+                            opponent = white_player
+
+                        print(f"[{game_id}] Recovered color profile safely: {bot_color.upper() if bot_color else 'UNKNOWN'}")
+                        if opponent and opponent.get('id'):
+                            print(f"[{game_id}] Recovered opponent: @{opponent.get('id')}")
                 except Exception as ex:
                     print(f"[{game_id}] Error recovering color profile: {ex}")
         else:
             continue
 
+        if not state:
+            continue
+
         if state.get('status') != 'started':
+            opponent_tag = f"@{opponent['id']}" if opponent and opponent.get('id') else ""
             print(f"[{game_id}] Match complete. Reason: {state.get('status')}")
-            send_chat_message(game_id, "player", "Good game! Thanks for playing.")
+            # include opponent mention if available
+            send_chat_message(game_id, "player", f"Good game! Thanks for playing. {opponent_tag}")
             break
 
         if event_type == 'gameFull' and not sent_welcome:
-            send_chat_message(game_id, "player", "Hello! Fast Engine Mode active. Good luck!")
+            if opponent and opponent.get('id'):
+                send_chat_message(game_id, "player", f"Hello @{opponent.get('id')}! Fast Engine Mode active. Good luck!")
+            else:
+                send_chat_message(game_id, "player", "Hello! Fast Engine Mode active. Good luck!")
             sent_welcome = True
 
         moves_played = state['moves'].strip().split() if state['moves'].strip() else []
@@ -204,16 +250,15 @@ response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
 
             engine_queue.put((game_id, moves_played, handle_move_result))
 
+# --- GLOBAL EVENT LISTENER ---
 def listen_to_events():
-    """Listens to global challenges and game starts with robust connection recycling."""
+    """Listens to global challenges and game starts with heavy diagnostic tracking."""
     print(f"Starting global event listener for user: {BOT_USERNAME}")
     url = "https://lichess.org/api/stream/event"
     
     while True:
         try:
-            # Crucial Fix: (Connect timeout, Read timeout) 
-            # If Lichess sends no packet or heartbeat for 60 seconds, it triggers an exception to safely reconnect
-            response = requests.get(url, headers=HEADERS, stream=True, timeout=(5, 60))
+            response = requests.get(url, headers=HEADERS, stream=True, timeout=None)
             print("[SERVER] Stream connection successfully established with Lichess pipelines.")
             
             for line in response.iter_lines():
@@ -253,9 +298,9 @@ def listen_to_events():
                     game_thread = threading.Thread(target=play_game, args=(game_id,), daemon=True)
                     game_thread.start()
                     
-        except (requests.exceptions.RequestException, Exception) as global_err:
-            print(f"[SYSTEM CRITICAL] Connection dropped or timed out: {global_err}")
-            print("[SYSTEM] Re-initializing stream pipeline in 5 seconds...")
+        except Exception as global_err:
+            print(f"[SYSTEM CRITICAL] Network or stream infrastructure drop: {global_err}")
+            print("[SYSTEM] Attempting automatic connection reconstruction in 5 seconds...")
             time.sleep(5)
 
 
